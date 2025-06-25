@@ -1,0 +1,52 @@
+# .github/workflows/smartsheet_sync.yml
+
+# Sets the name of the workflow as it will appear in the Actions tab of your repository.
+name: Smartsheet Sync Workflow
+
+# Defines the triggers that will start this workflow.
+on:
+  # Schedule the workflow to run automatically.
+  # This cron expression means "at every 15th minute".
+  # You can use https://crontab.guru/ to customize your schedule.
+  schedule:
+    - cron: '*/15 * * * *'
+
+  # Allows you to run this workflow manually from the Actions tab in GitHub.
+  # This is extremely useful for testing your changes immediately.
+  workflow_dispatch:
+
+# Defines the jobs that will be executed as part of the workflow.
+jobs:
+  # A single job named 'sync_smartsheet'.
+  sync_smartsheet:
+    # Specifies the type of machine to run the job on. 'ubuntu-latest' is a standard, reliable choice.
+    runs-on: ubuntu-latest
+
+    # A sequence of steps that make up the job. Each step is executed in order.
+    steps:
+      # Step 1: Check out your repository's code onto the runner.
+      # This allows the workflow to access your Python script and other files.
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      # Step 2: Set up a specific version of Python on the runner.
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10' # Specifies Python version 3.10.
+
+      # Step 3: Install the necessary Python packages.
+      # It upgrades the package installer (pip) and then installs the libraries
+      # listed in your requirements.txt file (i.e., smartsheet-python-sdk).
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Step 4: Execute your Python synchronization script.
+      - name: Run Smartsheet Sync Script
+        env:
+          # This is the crucial part that securely passes your Smartsheet API token
+          # from GitHub Secrets to the script as an environment variable.
+          SMARTSHEET_ACCESS_TOKEN: ${{ secrets.SMARTSHEET_ACCESS_TOKEN }}
+        run: python smartsheet_sync.py
