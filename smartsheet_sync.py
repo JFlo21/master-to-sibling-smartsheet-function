@@ -46,7 +46,6 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
 
     tracking_col_id = target_col_map[target_config['tracking_column_name']]
     
-    # NEW: Read the generated columns config
     generated_cols_config = target_config.get('generated_columns', {})
     week_end_col_id = generated_cols_config.get('week_ending_date')
     week_num_col_id = generated_cols_config.get('week_number')
@@ -68,10 +67,12 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
     for source_row in source_sheet.rows:
         composite_key = (source_row.id, current_wed_str)
         if composite_key not in existing_keys:
+            print(f"  - Preparing new snapshot for source row ID: {source_row.id}")
             new_row = smartsheet.models.Row()
             new_row.to_bottom = True
             
             # 1. Add mapped data from source
+            print("    - Mapping source column data...")
             for source_col_id, target_col_id in target_config['column_id_mapping'].items():
                 source_cell = source_row.get_column(source_col_id)
                 if source_cell and source_cell.value is not None:
@@ -85,7 +86,11 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
             
             # 4. Add the generated Week Number (if configured)
             if week_num_col_id:
+                print(f"    - Adding Week Number '{current_week_num}' to column ID {week_num_col_id}")
                 new_row.cells.append(smartsheet.models.Cell({'column_id': week_num_col_id, 'value': current_week_num}))
+            else:
+                print("    - WARNING: Week Number column not configured for this target.")
+
 
             rows_to_add.append(new_row)
 
