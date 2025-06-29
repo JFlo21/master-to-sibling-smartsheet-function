@@ -1,56 +1,68 @@
 # config.py
 
-# This configuration defines the synchronization rules from a source sheet
-# to one or more target sheets using a stateful "append-if-not-exist" logic.
-# This version corrects the column mappings to ensure all source columns
-# originate from the single source sheet.
+# This configuration has been updated to support two different sync modes:
+# 'update': The original logic that adds new rows and updates existing ones.
+# 'snapshot': The new logic that creates a new row for each source row every week.
 
 SHEET_CONFIG = {
-    'source_sheet_id': 3733355007790980,  # <-- The "brain" sheet where all data originates.
+    'source_sheet_id': 3733355007790980,
     'targets': [
         {
-            'id': 5723337641643908,          # <-- Your Target Sheet 1 ID.
-            'description': 'One-Way Log Sheet for Project Data',
-            'tracking_column_name': 'Source_Row_ID', 
+            # --- THIS SHEET WILL USE THE NEW SNAPSHOT LOGIC ---
+            'id': 5723337641643908,
+            'description': 'Weekly Snapshot Log 1',
+            'sync_mode': 'snapshot', # <-- New setting to control logic
+            'tracking_column_name': 'Source_Row_ID',
+            'week_ending_date_col_name': 'Week Ending Date', # <-- Name of the new date column
+            'week_number_col_name': 'Week Number',         # <-- Name of the new week number column
             'column_id_mapping': {
-                # Source Column ID (from brain sheet) : Target Column ID
                 6922793410842500: 5180541294563204,
+                # NOTE: This sheet needs its own date/week number columns and mappings
+                # if you want to use the snapshot feature here fully.
             }
         },
         {
-            'id': 485894524981124,           # <-- Your Target Sheet 2 ID.
+            # --- THIS SHEET IS NOW BACK TO THE STANDARD UPDATE LOGIC ---
+            'id': 485894524981124,
             'description': 'Second One-Way Log Sheet',
-            'tracking_column_name': 'Source_Row_ID', 
+            'sync_mode': 'update', # <-- Reverted to update mode
+            'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
-                # CORRECTED: Uses the source column from the brain sheet.
-                6922793410842500: 4526106084069252
+                6922793410842500: 4526106084069252,
             }
         },
         {
-            'id': 2198406433820548,           # <-- Your Target Sheet 3 ID.
-            'description': 'Third One-Way Log Sheet',
-            'tracking_column_name': 'Source_Row_ID', 
+            # --- THIS SHEET WILL NOW USE THE SNAPSHOT LOGIC WITH THE CORRECT MAPPINGS ---
+            'id': 2198406433820548,
+            'description': 'Third One-Way Log Sheet (Weekly Snapshot)',
+            'sync_mode': 'snapshot', # <-- Changed to snapshot mode
+            'tracking_column_name': 'Source_Row_ID',
+            'week_ending_date_col_name': 'Week Ending Date', # <-- Added for snapshot mode
+            'week_number_col_name': 'Week Number',         # <-- Added for snapshot mode
             'column_id_mapping': {
-                # Source Column ID (from brain sheet) : Target Column ID
-                6922793410842500: 5243793911271300
+                692279341082500: 5243793911271300,
+                # Mappings have been moved here from the previous sheet.
+                None: 740194283900804,  # Week Ending Date Target Column
+                None: 5717692373487492,  # Week Number Target Column
             }
         },
         {
-            'id': 7514584211476356,           # <-- Your Target Sheet 4 ID.
+            # --- These sheets will continue using the original 'update' logic ---
+            'id': 7514584211476356,
             'description': 'Fourth One-Way Log Sheet',
-            'tracking_column_name': 'Source_Row_ID', 
+            'sync_mode': 'update',
+            'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
-                # Source Column ID (from brain sheet) : Target Column ID
                 6922793410842500: 5604221820555140
             }
         },
         {
-            'id': 6315205374988164,           # <-- Your Target Sheet 5 ID.
+            'id': 6315205374988164,
             'description': 'Fifth One-Way Log Sheet',
-            'tracking_column_name': 'Source_Row_ID', 
+            'sync_mode': 'update',
+            'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
-                # Source Column ID (from brain sheet) : Target Column ID
-                3784709278224260: 2910306835320708
+                1865904432041860: 2910306835320708
             }
         }
     ]
