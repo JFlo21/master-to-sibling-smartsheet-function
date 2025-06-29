@@ -32,7 +32,7 @@ SHEET_CONFIG = {
             'tracking_column_name': 'Source_Row_ID', 
             'column_id_mapping': {
                 # Source Column ID (from brain sheet) : Target Column ID
-                692279341082500: 5243793911271300
+                6922793410842500: 5243793911271300
             }
         },
         {
