@@ -27,15 +27,36 @@ def get_target_row_map_for_update(smart, sheet, tracking_column_id):
             target_map[tracking_cell.value] = row
     return target_map
 
-def get_target_composite_keys_for_snapshot(smart, sheet, tracking_col_id, week_end_col_id):
+def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_num_col_id):
+    """
+    Scans a snapshot sheet to gather two key pieces of information:
+    1. A set of existing composite keys (source_id, date) to prevent duplicate snapshots.
+    2. A list of rows that are missing their week number and need to be backfilled.
+    """
     composite_keys = set()
-    # Fetch only the two columns needed to build the composite key for efficiency.
-    for row in smart.Sheets.get_sheet(sheet.id, include=['data'], column_ids=[tracking_col_id, week_end_col_id]).rows:
+    rows_to_backfill = []
+    
+    # Fetch all three columns needed for the logic in one API call for efficiency.
+    column_ids_to_fetch = [tracking_col_id, week_end_col_id]
+    if week_num_col_id:
+        column_ids_to_fetch.append(week_num_col_id)
+
+    for row in smart.Sheets.get_sheet(sheet.id, include=['data'], column_ids=column_ids_to_fetch).rows:
         tracking_cell = row.get_column(tracking_col_id)
         week_end_cell = row.get_column(week_end_col_id)
+        week_num_cell = row.get_column(week_num_col_id) if week_num_col_id else None
+
         if tracking_cell and tracking_cell.value and week_end_cell and week_end_cell.value:
+            # Add to the set for checking new snapshots
             composite_keys.add((tracking_cell.value, week_end_cell.value))
-    return composite_keys
+
+            # Check if a backfill is needed
+            if week_num_col_id and (week_num_cell is None or week_num_cell.value is None):
+                rows_to_backfill.append({
+                    'target_row_id': row.id,
+                    'week_ending_date_str': week_end_cell.value
+                })
+    return composite_keys, rows_to_backfill
 
 # --- LOGIC HANDLERS ---
 
@@ -51,16 +72,45 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
     week_num_col_id = generated_cols_config.get('week_number')
 
     if not week_end_col_id:
-        print("WARNING: 'week_ending_date' not configured for this snapshot sheet. Skipping date population.")
+        print("WARNING: 'week_ending_date' not configured for this snapshot sheet. Halting snapshot logic.")
         return
 
+    # --- NEW: BACKFILL LOGIC ---
+    # 1. Get metadata: existing keys AND rows that need their week number filled in.
+    existing_keys, rows_needing_backfill = get_snapshot_metadata(smart, target_sheet, tracking_col_id, week_end_col_id, week_num_col_id)
+    
+    if rows_needing_backfill:
+        print(f"Found {len(rows_needing_backfill)} existing rows missing a week number. Preparing to backfill...")
+        rows_to_update_backfill = []
+        for item in rows_needing_backfill:
+            try:
+                # Calculate the historical week number for the existing row
+                historical_wed = datetime.strptime(item['week_ending_date_str'], '%Y-%m-%d').date()
+                historical_week_num = calculate_week_number(historical_wed)
+                
+                # Prepare the row update object
+                update_row = smartsheet.models.Row()
+                update_row.id = item['target_row_id']
+                update_row.cells.append(smartsheet.models.Cell({
+                    'column_id': week_num_col_id,
+                    'value': historical_week_num
+                }))
+                rows_to_update_backfill.append(update_row)
+            except ValueError:
+                print(f"  - WARNING: Could not parse date '{item['week_ending_date_str']}' for row ID {item['target_row_id']}. Skipping backfill for this row.")
+        
+        if rows_to_update_backfill:
+            print(f"Backfilling week numbers for {len(rows_to_update_backfill)} rows...")
+            smart.Sheets.update_rows(target_sheet_id, rows_to_update_backfill)
+            print("Successfully backfilled week numbers.")
+
+    # --- EXISTING: ADD NEW SNAPSHOTS LOGIC ---
     current_wed = get_current_week_ending_date()
     current_week_num = calculate_week_number(current_wed)
     current_wed_str = current_wed.strftime('%Y-%m-%d')
 
-    print(f"Current Week Ending Date: {current_wed_str} (Week {current_week_num})")
-    
-    existing_keys = get_target_composite_keys_for_snapshot(smart, target_sheet, tracking_col_id, week_end_col_id)
+    # This line has been updated to remove the word "Week" from the log output.
+    print(f"Current Week Ending Date: {current_wed_str} (Project Week: {current_week_num})")
     print(f"Found {len(existing_keys)} existing snapshot entries in target.")
 
     rows_to_add = []
@@ -71,27 +121,19 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
             new_row = smartsheet.models.Row()
             new_row.to_bottom = True
             
-            # 1. Add mapped data from source
             print("    - Mapping source column data...")
             for source_col_id, target_col_id in target_config['column_id_mapping'].items():
                 source_cell = source_row.get_column(source_col_id)
                 if source_cell and source_cell.value is not None:
                     new_row.cells.append(smartsheet.models.Cell({'column_id': target_col_id, 'value': source_cell.value}))
             
-            # 2. Add the tracking ID
             new_row.cells.append(smartsheet.models.Cell({'column_id': tracking_col_id, 'value': source_row.id}))
-            
-            # 3. Add the generated Week Ending Date
             new_row.cells.append(smartsheet.models.Cell({'column_id': week_end_col_id, 'value': current_wed_str}))
             
-            # 4. Add the generated Week Number (if configured)
             if week_num_col_id:
                 print(f"    - Adding Week Number '{current_week_num}' to column ID {week_num_col_id}")
                 new_row.cells.append(smartsheet.models.Cell({'column_id': week_num_col_id, 'value': current_week_num}))
-            else:
-                print("    - WARNING: Week Number column not configured for this target.")
-
-
+            
             rows_to_add.append(new_row)
 
     if rows_to_add:
