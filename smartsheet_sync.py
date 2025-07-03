@@ -101,7 +101,7 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
     print(f"Found {len(target_snapshot_map)} existing snapshot entries in target.")
 
     rows_to_add = []
-    rows_to_update = [] # Changed from rows_to_enrich
+    rows_to_update = [] 
 
     for source_row in source_sheet.rows:
         composite_key = (source_row.id, current_wed_str)
