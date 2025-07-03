@@ -82,7 +82,8 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
             try:
                 historical_wed = datetime.strptime(item['week_ending_date_str'], '%Y-%m-%d').date()
                 historical_week_num = calculate_week_number(historical_wed)
-                update_row = smartsheet.models.Row(id=item['target_row_id'], cells=[smartsheet.models.Cell({'column_id': week_num_col_id, 'value': historical_week_num})])
+                # CORRECTED: The constructor now takes a single dictionary argument.
+                update_row = smartsheet.models.Row({'id': item['target_row_id'], 'cells': [smartsheet.models.Cell({'column_id': week_num_col_id, 'value': historical_week_num})]})
                 rows_to_update_backfill.append(update_row)
             except ValueError:
                 print(f"  - WARNING: Could not parse date '{item['week_ending_date_str']}' for row ID {item['target_row_id']}. Skipping backfill for this row.")
@@ -110,7 +111,8 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
             # --- NEW: ENRICHMENT LOGIC ---
             # The snapshot exists, check if we need to fill in blank cells.
             target_row = target_snapshot_map[composite_key]
-            update_row = smartsheet.models.Row(id=target_row.id, cells=[])
+            # CORRECTED: The constructor now takes a single dictionary argument.
+            update_row = smartsheet.models.Row({'id': target_row.id, 'cells': []})
             needs_enrichment = False
             
             for source_col_id, target_col_id in target_config['column_id_mapping'].items():
@@ -133,7 +135,8 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
             # --- ADD LOGIC (Unchanged) ---
             # This is a new snapshot for this week.
             print(f"  - Preparing new snapshot for source row ID: {source_row.id}")
-            new_row = smartsheet.models.Row(to_bottom=True, cells=[])
+            # CORRECTED: The constructor now takes a single dictionary argument.
+            new_row = smartsheet.models.Row({'to_bottom': True, 'cells': []})
             
             for source_col_id, target_col_id in target_config['column_id_mapping'].items():
                 source_cell = source_row.get_column(source_col_id)
