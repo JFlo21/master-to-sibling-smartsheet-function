@@ -31,7 +31,7 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
     """
     Scans a snapshot sheet to gather metadata.
     Returns:
-    1. A map of (source_id, date) -> target_row_object for enrichment checks.
+    1. A map of (source_id, date) -> target_row_object for update/enrichment checks.
     2. A list of rows that need their week number backfilled.
     """
     snapshot_map = {}
@@ -82,7 +82,6 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
             try:
                 historical_wed = datetime.strptime(item['week_ending_date_str'], '%Y-%m-%d').date()
                 historical_week_num = calculate_week_number(historical_wed)
-                # CORRECTED: The constructor now takes a single dictionary argument.
                 update_row = smartsheet.models.Row({'id': item['target_row_id'], 'cells': [smartsheet.models.Cell({'column_id': week_num_col_id, 'value': historical_week_num})]})
                 rows_to_update_backfill.append(update_row)
             except ValueError:
@@ -93,7 +92,7 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
             smart.Sheets.update_rows(target_sheet_id, rows_to_update_backfill)
             print("Successfully backfilled week numbers.")
 
-    # --- MAIN SNAPSHOT LOGIC (ADD, and now ENRICH) ---
+    # --- MAIN SNAPSHOT LOGIC (ADD or UPDATE) ---
     current_wed = get_current_week_ending_date()
     current_week_num = calculate_week_number(current_wed)
     current_wed_str = current_wed.strftime('%Y-%m-%d')
@@ -102,18 +101,17 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
     print(f"Found {len(target_snapshot_map)} existing snapshot entries in target.")
 
     rows_to_add = []
-    rows_to_enrich = [] # NEW: For updating blank cells in existing snapshots
+    rows_to_update = [] # Changed from rows_to_enrich
 
     for source_row in source_sheet.rows:
         composite_key = (source_row.id, current_wed_str)
         
         if composite_key in target_snapshot_map:
-            # --- NEW: ENRICHMENT LOGIC ---
-            # The snapshot exists, check if we need to fill in blank cells.
+            # --- RE-ENGINEERED: FULL UPDATE LOGIC ---
+            # The snapshot for this week exists. Let's check if it needs an update.
             target_row = target_snapshot_map[composite_key]
-            # CORRECTED: The constructor now takes a single dictionary argument.
             update_row = smartsheet.models.Row({'id': target_row.id, 'cells': []})
-            needs_enrichment = False
+            needs_update = False
             
             for source_col_id, target_col_id in target_config['column_id_mapping'].items():
                 source_cell = source_row.get_column(source_col_id)
@@ -122,20 +120,20 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
                 source_value = source_cell.value if source_cell else None
                 target_value = target_cell.value if target_cell else None
 
-                # If target is blank but source now has data, we need to update.
-                if (target_value is None or target_value == "") and source_value:
-                    print(f"  - Enriching existing snapshot for source row {source_row.id}. Found new value '{source_value}' for target column {target_col_id}.")
-                    needs_enrichment = True
-                    update_row.cells.append(smartsheet.models.Cell({'column_id': target_col_id, 'value': source_value}))
+                # If the source value is different from the target value, we need to update.
+                if source_value != target_value:
+                    print(f"  - Updating snapshot for source row {source_row.id}. Value for target column {target_col_id} changed from '{target_value}' to '{source_value}'.")
+                    needs_update = True
+                    # Use source_value or "" to clear the cell if source is now blank
+                    update_row.cells.append(smartsheet.models.Cell({'column_id': target_col_id, 'value': source_value or ""}))
             
-            if needs_enrichment:
-                rows_to_enrich.append(update_row)
+            if needs_update:
+                rows_to_update.append(update_row)
 
         else:
             # --- ADD LOGIC (Unchanged) ---
             # This is a new snapshot for this week.
             print(f"  - Preparing new snapshot for source row ID: {source_row.id}")
-            # CORRECTED: The constructor now takes a single dictionary argument.
             new_row = smartsheet.models.Row({'to_bottom': True, 'cells': []})
             
             for source_col_id, target_col_id in target_config['column_id_mapping'].items():
@@ -153,10 +151,10 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
             rows_to_add.append(new_row)
 
     # --- BATCH OPERATIONS ---
-    if rows_to_enrich:
-        print(f"Enriching {len(rows_to_enrich)} existing snapshot rows with new data...")
-        smart.Sheets.update_rows(target_sheet_id, rows_to_enrich)
-        print("Successfully enriched rows.")
+    if rows_to_update:
+        print(f"Updating {len(rows_to_update)} existing snapshot rows with current data...")
+        smart.Sheets.update_rows(target_sheet_id, rows_to_update)
+        print("Successfully updated rows.")
 
     if rows_to_add:
         print(f"Creating {len(rows_to_add)} new snapshot rows...")
