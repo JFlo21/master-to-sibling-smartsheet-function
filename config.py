@@ -9,7 +9,7 @@ SHEET_CONFIG = {
         {
             'id': 5723337641643908,
             'description': 'Weekly Snapshot Log 1',
-            'sync_mode': 'snapshot',
+            'sync_mode': 'update',
             'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
                 6922793410842500: 5180541294563204,
@@ -20,7 +20,7 @@ SHEET_CONFIG = {
         {
             'id': 485894524981124,
             'description': 'Second One-Way Log Sheet',
-            'sync_mode': 'snapshot',
+            'sync_mode': 'update',
             'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
                 6922793410842500: 4526106084069252,
@@ -44,7 +44,7 @@ SHEET_CONFIG = {
         {
             'id': 7514584211476356,
             'description': 'Fourth One-Way Log Sheet',
-            'sync_mode': 'snapshot',
+            'sync_mode': 'update',
             'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
                 6922793410842500: 5604221820555140
@@ -53,7 +53,7 @@ SHEET_CONFIG = {
         {
             'id': 6315205374988164,
             'description': 'Fifth One-Way Log Sheet',
-            'sync_mode': 'snapshot',
+            'sync_mode': 'update',
             'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
                 1865904432041860: 2910306835320708
