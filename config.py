@@ -27,18 +27,18 @@ SHEET_CONFIG = {
             }
         },
         {
-            'id': 2198406433820548,
-            'description': 'Third One-Way Log Sheet (Weekly Snapshot)',
+            'id': 2894503242321796,
+            'description': 'Primary Target Sheet (Weekly Snapshot)',
             'sync_mode': 'snapshot',
             'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
-                # This section now only contains direct source-to-target mappings.
-                6922793410842500: 5243793911271300,
+                # Map source "Work Request #" to target "Work Request #"
+                6922793410842500: 6811704037691268,
             },
             # NEW SECTION: This explicitly defines columns with script-generated values.
             'generated_columns': {
-                'week_ending_date': 740194283900804,  # Target Column ID for the date
-                'week_number': 5717692373487492,     # Target Column ID for the week number
+                'week_ending_date': 2308104410320772,  # Target "Week Ending Date" column
+                'week_number': 8957950735110020,       # Target "Week Number" column
             }
         },
         {
