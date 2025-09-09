@@ -78,9 +78,23 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
     if rows_needing_backfill:
         print(f"Found {len(rows_needing_backfill)} existing rows missing a week number. Preparing to backfill...")
         rows_to_update_backfill = []
+        
+        # Get sync start date filter if configured
+        sync_start_date_str = target_config.get('sync_start_date')
+        sync_start_date = None
+        if sync_start_date_str:
+            sync_start_date = datetime.strptime(sync_start_date_str, '%Y-%m-%d').date()
+            print(f"Backfill will respect date filter: only processing dates from {sync_start_date_str} onwards")
+        
         for item in rows_needing_backfill:
             try:
                 historical_wed = datetime.strptime(item['week_ending_date_str'], '%Y-%m-%d').date()
+                
+                # Skip backfill if this date is before the sync start date
+                if sync_start_date and historical_wed < sync_start_date:
+                    print(f"  - Skipping backfill for {item['week_ending_date_str']} (before sync start date)")
+                    continue
+                
                 historical_week_num = calculate_week_number(historical_wed)
                 update_row = smartsheet.models.Row({'id': item['target_row_id'], 'cells': [smartsheet.models.Cell({'column_id': week_num_col_id, 'value': historical_week_num})]})
                 rows_to_update_backfill.append(update_row)
@@ -96,6 +110,15 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
     current_wed = get_current_week_ending_date()
     current_week_num = calculate_week_number(current_wed)
     current_wed_str = current_wed.strftime('%Y-%m-%d')
+
+    # Check if this target has a sync start date filter
+    sync_start_date_str = target_config.get('sync_start_date')
+    if sync_start_date_str:
+        sync_start_date = datetime.strptime(sync_start_date_str, '%Y-%m-%d').date()
+        if current_wed < sync_start_date:
+            print(f"Current week ending date ({current_wed_str}) is before sync start date ({sync_start_date_str}). Skipping sync for this target.")
+            return
+        print(f"Date filter active: Only syncing data from {sync_start_date_str} onwards. Current week ending: {current_wed_str}")
 
     print(f"Current Week Ending Date: {current_wed_str} (Project Week: {current_week_num})")
     print(f"Found {len(target_snapshot_map)} existing snapshot entries in target.")

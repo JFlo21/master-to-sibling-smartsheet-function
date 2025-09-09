@@ -39,7 +39,9 @@ SHEET_CONFIG = {
             'generated_columns': {
                 'week_ending_date': 2308104410320772,  # Target "Week Ending Date" column
                 'week_number': 8957950735110020,       # Target "Week Number" column
-            }
+            },
+            # DATE FILTER: Only sync data from this date onwards
+            'sync_start_date': '2024-09-07'  # Only sync data from 09/07/2024 onwards
         },
         {
             'id': 7514584211476356,
