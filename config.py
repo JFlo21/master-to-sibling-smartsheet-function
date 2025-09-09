@@ -44,6 +44,23 @@ SHEET_CONFIG = {
             'sync_start_date': '2024-09-07'  # Only sync data from 09/07/2024 onwards
         },
         {
+            'id': 2198406433820548,
+            'description': 'Secondary Target Sheet (Weekly Snapshot - Duplicate)',
+            'sync_mode': 'snapshot',
+            'tracking_column_name': 'Source_Row_ID',
+            'column_id_mapping': {
+                # Map source "Work Request #" to target "Work Request #"
+                6922793410842500: 5243793911271300,
+            },
+            # NEW SECTION: This explicitly defines columns with script-generated values.
+            'generated_columns': {
+                'week_ending_date': 740194283900804,   # Target "Week Ending Date" column
+                'week_number': 5717692373487492,       # Target "Week Number" column
+            },
+            # DATE FILTER: Only sync data from this date onwards (same as primary sheet)
+            'sync_start_date': '2024-09-07'  # Only sync data from 09/07/2024 onwards
+        },
+        {
             'id': 7514584211476356,
             'description': 'Fourth One-Way Log Sheet',
             'sync_mode': 'update',
