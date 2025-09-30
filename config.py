@@ -61,15 +61,6 @@ SHEET_CONFIG = {
             'sync_start_date': '2024-09-07'  # Only sync data from 09/07/2024 onwards
         },
         {
-            'id': 7514584211476356,
-            'description': 'Fourth One-Way Log Sheet',
-            'sync_mode': 'update',
-            'tracking_column_name': 'Source_Row_ID',
-            'column_id_mapping': {
-                6922793410842500: 5604221820555140
-            }
-        },
-        {
             'id': 6315205374988164,
             'description': 'Fifth One-Way Log Sheet',
             'sync_mode': 'update',
