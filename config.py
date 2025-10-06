@@ -41,7 +41,7 @@ SHEET_CONFIG = {
                 'week_number': 8957950735110020,       # Target "Week Number" column
             },
             # DATE FILTER: Only sync data from this date onwards
-            'sync_start_date': '2024-09-07'  # Only sync data from 09/07/2024 onwards
+            'sync_start_date': '2025-09-07'  # Only sync data from 09/07/2025 onwards
         },
         {
             'id': 2198406433820548,
@@ -57,8 +57,26 @@ SHEET_CONFIG = {
                 'week_ending_date': 740194283900804,   # Target "Week Ending Date" column
                 'week_number': 5717692373487492,       # Target "Week Number" column
             },
-            # DATE FILTER: Only sync data from this date onwards (same as primary sheet)
-            'sync_start_date': '2024-09-07'  # Only sync data from 09/07/2024 onwards
+            # DATE FILTERS: Active for this target from start to end dates
+            'sync_start_date': '2025-09-07',  # Only sync data from 09/07/2025 onwards
+            'sync_end_date': '2025-10-04'     # Sunset on 10/04/2025 so a new sheet takes over 10/05
+        },
+        {
+            'id': 6620020097372036,
+            'description': 'Secondary Target Sheet (Weekly Snapshot - Duplicate) — Active 2025-10-05+',
+            'sync_mode': 'snapshot',
+            'tracking_column_name': 'Source_Row_ID',
+            'column_id_mapping': {
+                # Map source "Work Request #" to target column by name in the new sheet
+                6922793410842500: 'Work Request #',
+            },
+            # NEW SECTION: Columns with script-generated values (resolved by name)
+            'generated_columns': {
+                'week_ending_date': 'Week Ending Date',
+                'week_number': 'Week Number',
+            },
+            # DATE FILTER: New secondary sheet becomes active starting 10/05/2025
+            'sync_start_date': '2025-10-05'
         },
         {
             'id': 6315205374988164,
