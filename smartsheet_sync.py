@@ -225,9 +225,11 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
                         target_value = target_cell.value if target_cell else None
 
                         if source_value != target_value:
+                            # Ensure we always have a valid value (convert None to empty string)
+                            update_value = source_value if source_value is not None else ""
                             print(f"  - Updating snapshot for source row {source_row.id}. Value for target column {target_col_id} changed from '{target_value}' to '{source_value}'.")
                             needs_update = True
-                            update_row.cells.append(smartsheet.models.Cell({'column_id': target_col_id, 'value': source_value or ""}))
+                            update_row.cells.append(smartsheet.models.Cell({'column_id': target_col_id, 'value': update_value}))
                     
                     if needs_update:
                         rows_to_update.append(update_row)
@@ -243,7 +245,10 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
                         print(f"    ! Skipping mapping for target column ref '{target_col_ref}' (not found)")
                         continue
                     source_cell = source_row.get_column(source_col_id)
-                    source_value = source_cell.value if source_cell else ""
+                    source_value = source_cell.value if source_cell else None
+                    # Ensure we always have a valid value (convert None to empty string)
+                    if source_value is None:
+                        source_value = ""
                     new_row.cells.append(smartsheet.models.Cell({'column_id': target_col_id, 'value': source_value}))
                 
                 new_row.cells.append(smartsheet.models.Cell({'column_id': tracking_col_id, 'value': source_row.id}))
