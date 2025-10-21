@@ -63,7 +63,7 @@ SHEET_CONFIG = {
         },
         {
             'id': 6620020097372036,
-            'description': 'Secondary Target Sheet (Weekly Snapshot - Duplicate) — Active 2025-10-05+',
+            'description': 'Secondary Target Sheet (Weekly Snapshot - Duplicate) — Active 2025-10-05 to 2025-10-18',
             'sync_mode': 'snapshot',
             'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
@@ -75,8 +75,26 @@ SHEET_CONFIG = {
                 'week_ending_date': 'Week Ending Date',
                 'week_number': 'Week Number',
             },
-            # DATE FILTER: New secondary sheet becomes active starting 10/05/2025
-            'sync_start_date': '2025-10-05'
+            # DATE FILTERS: Active for this target from start to end dates
+            'sync_start_date': '2025-10-05',  # Active starting 10/05/2025
+            'sync_end_date': '2025-10-18'     # Sunset on 10/18/2025 so a new sheet takes over 10/19
+        },
+        {
+            'id': 5477191610486660,
+            'description': 'Tertiary Target Sheet (Weekly Snapshot - Duplicate) — Active 2025-10-19+',
+            'sync_mode': 'snapshot',
+            'tracking_column_name': 'Source_Row_ID',
+            'column_id_mapping': {
+                # Map source "Work Request #" to target column by name in the new sheet
+                6922793410842500: 'Work Request #',
+            },
+            # NEW SECTION: Columns with script-generated values (resolved by name)
+            'generated_columns': {
+                'week_ending_date': 'Week Ending Date',
+                'week_number': 'Week Number',
+            },
+            # DATE FILTER: New tertiary sheet becomes active starting 10/19/2025
+            'sync_start_date': '2025-10-19'
         },
         {
             'id': 6315205374988164,
