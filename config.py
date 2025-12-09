@@ -32,6 +32,19 @@
 # ============================================================================
 
 SHEET_CONFIG = {
+    'source_sheets': [
+        {
+            'id': 3733355007790980,
+            'description': 'Primary Master Sheet',
+            'work_request_column_id': 6922793410842500,
+        },
+        {
+            'id': 6329947502104452,
+            'description': 'Secondary Master Sheet',
+            'work_request_column_id': 1509281497829252,
+        },
+    ],
+    # Legacy support: keep source_sheet_id for update mode targets
     'source_sheet_id': 3733355007790980,
     'targets': [
         # ====================================================================
@@ -77,9 +90,30 @@ SHEET_CONFIG = {
         # This allows for parallel historical tracking across multiple sheets.
         # ====================================================================
         
+        # PRIMARY TARGET SHEET - Earliest start date
+        {
+            'id': 2198406433820548,
+            'description': 'Primary Target Sheet (Weekly Snapshot)',
+            'sync_mode': 'snapshot',
+            'tracking_column_name': 'Source_Row_ID',
+            'column_id_mapping': {
+                # Map source "Work Request #" to target "Work Request #"
+                6922793410842500: 5243793911271300,
+            },
+            # Columns populated by script-generated calculated values
+            'generated_columns': {
+                'week_ending_date': 740194283900804,   # Target "Week Ending Date" column
+                'week_number': 5717692373487492,       # Target "Week Number" column
+            },
+            # DATE FILTER: Independent start date - no end date
+            # This sheet processes all data from 06/29/2025 onwards indefinitely
+            'sync_start_date': '2025-06-29',
+            'target_work_request_column': 5243793911271300,  # Explicit target column ID
+        },
+        # SECONDARY TARGET SHEET
         {
             'id': 2894503242321796,
-            'description': 'Primary Target Sheet (Weekly Snapshot)',
+            'description': 'Secondary Target Sheet (Weekly Snapshot)',
             'sync_mode': 'snapshot',
             'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
@@ -93,29 +127,13 @@ SHEET_CONFIG = {
             },
             # DATE FILTER: Independent start date - no end date
             # This sheet processes all data from 09/07/2025 onwards indefinitely
-            'sync_start_date': '2025-09-07'
+            'sync_start_date': '2025-09-07',
+            'target_work_request_column': 6811704037691268,  # Explicit target column ID
         },
-        {
-            'id': 2198406433820548,
-            'description': 'Secondary Target Sheet (Weekly Snapshot - Duplicate)',
-            'sync_mode': 'snapshot',
-            'tracking_column_name': 'Source_Row_ID',
-            'column_id_mapping': {
-                # Map source "Work Request #" to target "Work Request #"
-                6922793410842500: 5243793911271300,
-            },
-            # Columns populated by script-generated calculated values
-            'generated_columns': {
-                'week_ending_date': 740194283900804,   # Target "Week Ending Date" column
-                'week_number': 5717692373487492,       # Target "Week Number" column
-            },
-            # DATE FILTER: Independent start date - no end date
-            # This sheet processes all data from 09/07/2025 onwards indefinitely
-            'sync_start_date': '2025-09-07'
-        },
+        # TERTIARY TARGET SHEET
         {
             'id': 6620020097372036,
-            'description': 'Secondary Target Sheet (Weekly Snapshot - Duplicate) — Active 2025-10-05+',
+            'description': 'Tertiary Target Sheet (Weekly Snapshot) — Active 2025-10-05+',
             'sync_mode': 'snapshot',
             'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
@@ -132,9 +150,10 @@ SHEET_CONFIG = {
             # This sheet processes all data from 10/05/2025 onwards indefinitely
             'sync_start_date': '2025-10-05'
         },
+        # QUATERNARY TARGET SHEET
         {
             'id': 5477191610486660,
-            'description': 'Tertiary Target Sheet (Weekly Snapshot - Duplicate) — Active 2025-10-19+',
+            'description': 'Quaternary Target Sheet (Weekly Snapshot) — Active 2025-10-19+',
             'sync_mode': 'snapshot',
             'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
@@ -151,14 +170,10 @@ SHEET_CONFIG = {
             # This sheet processes all data from 10/19/2025 onwards indefinitely
             'sync_start_date': '2025-10-19'
         },
-        
-        # ====================================================================
-        # NEW SNAPSHOT TARGET - Added 2025-11-03
-        # Quaternary Sheet: Active from 2025-10-31 onwards
-        # ====================================================================
+        # QUINARY TARGET SHEET
         {
             'id': 8891640346267524,
-            'description': 'Quaternary Target Sheet (Weekly Snapshot - Duplicate) — Active 2025-10-31+',
+            'description': 'Quinary Target Sheet (Weekly Snapshot) — Active 2025-10-31+',
             'sync_mode': 'snapshot',
             'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
