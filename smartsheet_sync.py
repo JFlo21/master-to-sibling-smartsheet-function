@@ -48,6 +48,42 @@ def generate_composite_tracking_id(source_sheet_id, row_id):
     """
     return f"{source_sheet_id}_{row_id}"
 
+def extract_row_id_from_tracking_id(tracking_id):
+    """
+    Extracts the row_id portion from a tracking ID.
+    Works for both old format (just row_id: '1952874516057988') and
+    new composite format (source_sheet_id_row_id: '3733355007790980_1952874516057988').
+    
+    Args:
+        tracking_id: The tracking ID string
+        
+    Returns:
+        The row_id portion as a string, or the original ID if no underscore is present
+    """
+    if tracking_id is None:
+        return None
+    tracking_str = str(tracking_id)
+    if '_' in tracking_str:
+        # New composite format: return the part after the underscore
+        return tracking_str.split('_', 1)[1]
+    else:
+        # Old format: the entire value is the row_id
+        return tracking_str
+
+def is_old_format_tracking_id(tracking_id):
+    """
+    Checks if a tracking ID is in the old format (no underscore separator).
+    
+    Args:
+        tracking_id: The tracking ID string
+        
+    Returns:
+        bool: True if the tracking ID is in old format, False otherwise
+    """
+    if tracking_id is None:
+        return False
+    return '_' not in str(tracking_id)
+
 def is_not_found_error(exception):
     """
     Checks if a Smartsheet API exception is a "Not Found" error (code 1006).
@@ -164,11 +200,17 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
     2. A list of rows that need their week number backfilled.
     3. A set of unique week ending dates already present in the sheet.
     4. A list of duplicate row IDs to delete.
+    
+    Also detects and marks for deletion old-format tracking IDs that have corresponding
+    new composite tracking IDs (e.g., '1952874516057988' when '3733355007790980_1952874516057988' exists).
     """
     snapshot_map = {}
     rows_to_backfill = []
     existing_week_dates = set()
     duplicate_row_ids = []
+    
+    # Track old-format entries by (row_id, week_end_date) -> row for migration detection
+    old_format_entries = {}
     
     # We need all columns to check for blank cells, so we fetch the full sheet data here.
     for row in smart.Sheets.get_sheet(sheet.id, include=['data']).rows:
@@ -190,12 +232,41 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
                 snapshot_map[composite_key] = row
                 existing_week_dates.add(week_end_cell.value)
                 
+                # Track old-format entries for potential cleanup
+                if is_old_format_tracking_id(normalized_tracking_id):
+                    # Old format: tracking_id is just the row_id
+                    old_format_key = (normalized_tracking_id, week_end_cell.value)
+                    old_format_entries[old_format_key] = row.id
+                else:
+                    # New composite format: check if there's an old-format entry to clean up
+                    row_id_portion = extract_row_id_from_tracking_id(normalized_tracking_id)
+                    old_format_key = (row_id_portion, week_end_cell.value)
+                    if old_format_key in old_format_entries:
+                        # Found an old-format entry that matches this new composite entry
+                        old_row_id = old_format_entries[old_format_key]
+                        if old_row_id not in duplicate_row_ids:
+                            duplicate_row_ids.append(old_row_id)
+                            print(f"  Marking old-format tracking ID row for deletion: {old_row_id} (migrated to composite ID)")
+                
                 # Only add non-duplicate rows to backfill list
                 if week_num_col_id and (week_num_cell is None or week_num_cell.value is None):
                     rows_to_backfill.append({
                         'target_row_id': row.id,
                         'week_ending_date_str': week_end_cell.value
                     })
+    
+    # Second pass: Check for any new composite entries that match old-format entries
+    # This handles cases where the new entry was processed before the old entry in the loop
+    for (tracking_id, week_end_date), row in snapshot_map.items():
+        if not is_old_format_tracking_id(tracking_id):
+            row_id_portion = extract_row_id_from_tracking_id(tracking_id)
+            old_format_key = (row_id_portion, week_end_date)
+            if old_format_key in snapshot_map:
+                old_row = snapshot_map[old_format_key]
+                if old_row.id not in duplicate_row_ids:
+                    duplicate_row_ids.append(old_row.id)
+                    print(f"  Marking old-format tracking ID row for deletion: {old_row.id} (migrated to composite ID)")
+    
     return snapshot_map, rows_to_backfill, existing_week_dates, duplicate_row_ids
 
 # --- LOGIC HANDLERS ---
