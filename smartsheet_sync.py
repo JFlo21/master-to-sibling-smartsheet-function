@@ -2,18 +2,8 @@
 
 import os
 import smartsheet
-from config import SHEET_CONFIG
+from config import SHEET_CONFIG, ENABLE_HISTORICAL_BACKFILL, HISTORICAL_BACKFILL_START
 from datetime import datetime, date, timedelta
-
-# ============================================================================
-# CONFIGURATION FLAGS
-# ============================================================================
-# Enable historical backfill to create missing snapshot rows for past weeks
-# Set to True for initial run to fill gaps, then can be set to False
-ENABLE_HISTORICAL_BACKFILL = True
-
-# Start date for historical backfill - scans all weeks from this date forward
-HISTORICAL_BACKFILL_START = '2025-06-15'
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -246,13 +236,16 @@ def handle_snapshot_sync(smart, source_data_list, target_config):
         # Generate all Sundays (week ending dates) from first_sunday to current_wed
         missing_weeks = []
         week_date = first_sunday
+        
+        # Pre-compute tracking IDs for performance
+        all_tracking_ids = set(normalize_tracking_id(composite_id) for _, composite_id, _ in all_source_rows)
 
         while week_date < current_wed and (sync_end_date is None or week_date <= sync_end_date):
             week_date_str = week_date.strftime('%Y-%m-%d')
             
-            # Count how many rows exist for this week
-            existing_count = sum(1 for source_row, composite_id, _ in all_source_rows 
-                               if (normalize_tracking_id(composite_id), week_date_str) in target_snapshot_map)
+            # Count how many rows exist for this week using set intersection
+            week_snapshot_keys = set(tracking_id for (tracking_id, week) in target_snapshot_map.keys() if week == week_date_str)
+            existing_count = len(week_snapshot_keys)
             
             # Check if this week has incomplete snapshot
             if existing_count < total_source_rows:
@@ -466,10 +459,12 @@ def main_process(smart, config):
             source_sheet = smart.Sheets.get_sheet(legacy_source_sheet_id)
             print(f"Successfully loaded legacy source sheet: '{source_sheet.name}' with {len(source_sheet.rows)} rows.")
             # Create a dummy config for legacy mode
+            # Note: work_request_column_id is None because update mode uses column_id_mapping
+            # from the target config rather than source config work_request_column_id
             legacy_config = {
                 'id': legacy_source_sheet_id,
                 'description': 'Legacy Source Sheet',
-                'work_request_column_id': None  # Not used in legacy update mode
+                'work_request_column_id': None  # Only used in snapshot mode with multi-source
             }
             source_data_list = [(source_sheet, legacy_config)]
         except Exception as e:

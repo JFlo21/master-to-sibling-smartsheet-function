@@ -7,7 +7,8 @@
 # the Master-to-Sibling Smartsheet synchronization function.
 #
 # ARCHITECTURE OVERVIEW:
-# - source_sheet_id: Master Smartsheet serving as the single source of truth
+# - source_sheets: Array of source Smartsheet configurations (multi-source support)
+# - source_sheet_id: Legacy single source (maintained for backward compatibility)
 # - targets: Array of target sheet configurations with independent sync rules
 #
 # SYNC MODES:
@@ -29,7 +30,17 @@
 # GENERATED COLUMNS:
 # - week_ending_date: Calculated field for weekly snapshot grouping
 # - week_number: ISO week number for temporal indexing and reporting
+#
+# HISTORICAL BACKFILL CONFIGURATION:
+# - ENABLE_HISTORICAL_BACKFILL: Set to True to fill missing historical snapshot rows
+#                                Set to False after initial backfill is complete
+# - HISTORICAL_BACKFILL_START: Start date for scanning historical weeks
+#                               Scans all weeks from this date to current week
 # ============================================================================
+
+# Historical Backfill Settings
+ENABLE_HISTORICAL_BACKFILL = True
+HISTORICAL_BACKFILL_START = '2025-06-15'
 
 SHEET_CONFIG = {
     'source_sheets': [
@@ -91,6 +102,9 @@ SHEET_CONFIG = {
         # ====================================================================
         
         # PRIMARY TARGET SHEET - Earliest start date
+        # NOTE: This sheet was previously configured with start date 2025-09-07
+        # Changed to 2025-06-29 to enable historical backfill per business requirements
+        # Ensure source data is available for the earlier date range
         {
             'id': 2198406433820548,
             'description': 'Primary Target Sheet (Weekly Snapshot)',
