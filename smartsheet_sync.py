@@ -48,6 +48,25 @@ def generate_composite_tracking_id(source_sheet_id, row_id):
     """
     return f"{source_sheet_id}_{row_id}"
 
+def is_not_found_error(exception):
+    """
+    Checks if a Smartsheet API exception is a "Not Found" error (code 1006).
+    This error occurs when trying to operate on a row that no longer exists.
+    
+    Args:
+        exception: A smartsheet.exceptions.ApiError exception
+        
+    Returns:
+        bool: True if the error is a 1006 Not Found error, False otherwise
+    """
+    error_obj = getattr(exception, 'error', None)
+    if error_obj is None:
+        return False
+    result_obj = getattr(error_obj, 'result', None)
+    if result_obj is None:
+        return False
+    return getattr(result_obj, 'code', None) == 1006
+
 def load_all_source_data(smart, source_sheets_config):
     """
     Loads data from all configured source sheets.
@@ -116,7 +135,7 @@ def delete_duplicate_rows(smart, sheet_id, duplicate_row_ids):
             print(f"  Batch {batch_num} deleted successfully.")
         except smartsheet.exceptions.ApiError as e:
             # Error code 1006 means "Not Found" - rows may have been deleted already
-            if hasattr(e, 'error') and hasattr(e.error, 'result') and e.error.result.code == 1006:
+            if is_not_found_error(e):
                 print(f"  Batch {batch_num}: Some rows not found (already deleted). Retrying individually...")
                 # Try deleting rows one by one to salvage what we can
                 for row_id in batch:
@@ -124,7 +143,7 @@ def delete_duplicate_rows(smart, sheet_id, duplicate_row_ids):
                         smart.Sheets.delete_rows(sheet_id, [row_id])
                         deleted_count += 1
                     except smartsheet.exceptions.ApiError as inner_e:
-                        if hasattr(inner_e, 'error') and hasattr(inner_e.error, 'result') and inner_e.error.result.code == 1006:
+                        if is_not_found_error(inner_e):
                             skipped_count += 1
                             print(f"    Row {row_id} not found (already deleted), skipping.")
                         else:
