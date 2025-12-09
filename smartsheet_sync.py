@@ -103,15 +103,39 @@ def delete_duplicate_rows(smart, sheet_id, duplicate_row_ids):
     # Process in batches of 100 to avoid API limits
     batch_size = 100
     total_batches = (len(duplicate_row_ids) + batch_size - 1) // batch_size
+    deleted_count = 0
+    skipped_count = 0
     
     for i in range(0, len(duplicate_row_ids), batch_size):
         batch = duplicate_row_ids[i:i + batch_size]
         batch_num = (i // batch_size) + 1
         print(f"  Deleting batch {batch_num}/{total_batches} ({len(batch)} rows)...")
-        smart.Sheets.delete_rows(sheet_id, batch)
-        print(f"  Batch {batch_num} deleted successfully.")
+        try:
+            smart.Sheets.delete_rows(sheet_id, batch)
+            deleted_count += len(batch)
+            print(f"  Batch {batch_num} deleted successfully.")
+        except smartsheet.exceptions.ApiError as e:
+            # Error code 1006 means "Not Found" - rows may have been deleted already
+            if hasattr(e, 'error') and hasattr(e.error, 'result') and e.error.result.code == 1006:
+                print(f"  Batch {batch_num}: Some rows not found (already deleted). Retrying individually...")
+                # Try deleting rows one by one to salvage what we can
+                for row_id in batch:
+                    try:
+                        smart.Sheets.delete_rows(sheet_id, [row_id])
+                        deleted_count += 1
+                    except smartsheet.exceptions.ApiError as inner_e:
+                        if hasattr(inner_e, 'error') and hasattr(inner_e.error, 'result') and inner_e.error.result.code == 1006:
+                            skipped_count += 1
+                            print(f"    Row {row_id} not found (already deleted), skipping.")
+                        else:
+                            raise inner_e
+            else:
+                raise e
     
-    print(f"Successfully deleted all {len(duplicate_row_ids)} duplicate rows.")
+    if skipped_count > 0:
+        print(f"Completed: Deleted {deleted_count} rows, skipped {skipped_count} rows (already deleted).")
+    else:
+        print(f"Successfully deleted all {deleted_count} duplicate rows.")
 
 def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_num_col_id):
     """
