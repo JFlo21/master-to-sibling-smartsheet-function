@@ -48,6 +48,61 @@ def generate_composite_tracking_id(source_sheet_id, row_id):
     """
     return f"{source_sheet_id}_{row_id}"
 
+def extract_row_id_from_tracking_id(tracking_id):
+    """
+    Extracts the row_id portion from a tracking ID.
+    Works for both old format (just row_id: '1952874516057988') and
+    new composite format (source_sheet_id_row_id: '3733355007790980_1952874516057988').
+    
+    Args:
+        tracking_id: The tracking ID string
+        
+    Returns:
+        The row_id portion as a string, or the original ID if no underscore is present
+    """
+    if tracking_id is None:
+        return None
+    tracking_str = str(tracking_id)
+    if '_' in tracking_str:
+        # New composite format: return the part after the underscore
+        return tracking_str.split('_', 1)[1]
+    else:
+        # Old format: the entire value is the row_id
+        return tracking_str
+
+def is_old_format_tracking_id(tracking_id):
+    """
+    Checks if a tracking ID is in the old format (no underscore separator).
+    
+    Args:
+        tracking_id: The tracking ID string
+        
+    Returns:
+        bool: True if the tracking ID is in old format, False otherwise
+    """
+    if tracking_id is None:
+        return False
+    return '_' not in str(tracking_id)
+
+def is_not_found_error(exception):
+    """
+    Checks if a Smartsheet API exception is a "Not Found" error (code 1006).
+    This error occurs when trying to operate on a row that no longer exists.
+    
+    Args:
+        exception: A smartsheet.exceptions.ApiError exception
+        
+    Returns:
+        bool: True if the error is a 1006 Not Found error, False otherwise
+    """
+    error_obj = getattr(exception, 'error', None)
+    if error_obj is None:
+        return False
+    result_obj = getattr(error_obj, 'result', None)
+    if result_obj is None:
+        return False
+    return getattr(result_obj, 'code', None) == 1006
+
 def load_all_source_data(smart, source_sheets_config):
     """
     Loads data from all configured source sheets.
@@ -103,15 +158,39 @@ def delete_duplicate_rows(smart, sheet_id, duplicate_row_ids):
     # Process in batches of 100 to avoid API limits
     batch_size = 100
     total_batches = (len(duplicate_row_ids) + batch_size - 1) // batch_size
+    deleted_count = 0
+    skipped_count = 0
     
     for i in range(0, len(duplicate_row_ids), batch_size):
         batch = duplicate_row_ids[i:i + batch_size]
         batch_num = (i // batch_size) + 1
         print(f"  Deleting batch {batch_num}/{total_batches} ({len(batch)} rows)...")
-        smart.Sheets.delete_rows(sheet_id, batch)
-        print(f"  Batch {batch_num} deleted successfully.")
+        try:
+            smart.Sheets.delete_rows(sheet_id, batch)
+            deleted_count += len(batch)
+            print(f"  Batch {batch_num} deleted successfully.")
+        except smartsheet.exceptions.ApiError as e:
+            # Error code 1006 means "Not Found" - rows may have been deleted already
+            if is_not_found_error(e):
+                print(f"  Batch {batch_num}: Some rows not found (already deleted). Retrying individually...")
+                # Try deleting rows one by one to salvage what we can
+                for row_id in batch:
+                    try:
+                        smart.Sheets.delete_rows(sheet_id, [row_id])
+                        deleted_count += 1
+                    except smartsheet.exceptions.ApiError as inner_e:
+                        if is_not_found_error(inner_e):
+                            skipped_count += 1
+                            print(f"    Row {row_id} not found (already deleted), skipping.")
+                        else:
+                            raise inner_e
+            else:
+                raise e
     
-    print(f"Successfully deleted all {len(duplicate_row_ids)} duplicate rows.")
+    if skipped_count > 0:
+        print(f"Completed: Deleted {deleted_count} rows, skipped {skipped_count} rows (already deleted).")
+    else:
+        print(f"Successfully deleted all {deleted_count} duplicate rows.")
 
 def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_num_col_id):
     """
@@ -121,11 +200,19 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
     2. A list of rows that need their week number backfilled.
     3. A set of unique week ending dates already present in the sheet.
     4. A list of duplicate row IDs to delete.
+    
+    Also detects and marks for deletion old-format tracking IDs that have corresponding
+    new composite tracking IDs (e.g., '1952874516057988' when '3733355007790980_1952874516057988' exists).
     """
     snapshot_map = {}
     rows_to_backfill = []
     existing_week_dates = set()
-    duplicate_row_ids = []
+    duplicate_row_ids_set = set()  # Use set for O(1) lookup performance
+    
+    # Track old-format entries by (row_id, week_end_date) -> row_id for migration detection
+    old_format_entries = {}
+    # Track new composite entries for second pass matching
+    new_composite_entries = []
     
     # We need all columns to check for blank cells, so we fetch the full sheet data here.
     for row in smart.Sheets.get_sheet(sheet.id, include=['data']).rows:
@@ -141,11 +228,30 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
             # Check if this composite key already exists (duplicate detection)
             if composite_key in snapshot_map:
                 # This is a duplicate - mark for deletion
-                duplicate_row_ids.append(row.id)
+                duplicate_row_ids_set.add(row.id)
             else:
                 # First occurrence - keep this row
                 snapshot_map[composite_key] = row
                 existing_week_dates.add(week_end_cell.value)
+                
+                # Track old-format entries for potential cleanup
+                if is_old_format_tracking_id(normalized_tracking_id):
+                    # Old format: tracking_id is just the row_id
+                    old_format_key = (normalized_tracking_id, week_end_cell.value)
+                    old_format_entries[old_format_key] = row.id
+                else:
+                    # New composite format: track for second pass and check against existing old entries
+                    row_id_portion = extract_row_id_from_tracking_id(normalized_tracking_id)
+                    new_composite_entries.append((row_id_portion, week_end_cell.value))
+                    
+                    # Check if there's an old-format entry to clean up
+                    old_format_key = (row_id_portion, week_end_cell.value)
+                    if old_format_key in old_format_entries:
+                        # Found an old-format entry that matches this new composite entry
+                        old_row_id = old_format_entries[old_format_key]
+                        if old_row_id not in duplicate_row_ids_set:
+                            duplicate_row_ids_set.add(old_row_id)
+                            print(f"  Marking old-format tracking ID row for deletion: {old_row_id} (migrated to composite ID)")
                 
                 # Only add non-duplicate rows to backfill list
                 if week_num_col_id and (week_num_cell is None or week_num_cell.value is None):
@@ -153,7 +259,18 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
                         'target_row_id': row.id,
                         'week_ending_date_str': week_end_cell.value
                     })
-    return snapshot_map, rows_to_backfill, existing_week_dates, duplicate_row_ids
+    
+    # Second pass: Check for any new composite entries that match old-format entries in snapshot_map
+    # This handles cases where the old entry was processed before the new entry in the loop
+    for (row_id_portion, week_end_date) in new_composite_entries:
+        old_format_key = (row_id_portion, week_end_date)
+        if old_format_key in snapshot_map:
+            old_row = snapshot_map[old_format_key]
+            if old_row.id not in duplicate_row_ids_set:
+                duplicate_row_ids_set.add(old_row.id)
+                print(f"  Marking old-format tracking ID row for deletion: {old_row.id} (migrated to composite ID)")
+    
+    return snapshot_map, rows_to_backfill, existing_week_dates, list(duplicate_row_ids_set)
 
 # --- LOGIC HANDLERS ---
 
