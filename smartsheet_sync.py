@@ -145,6 +145,7 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
             else:
                 # First occurrence - keep this row
                 snapshot_map[composite_key] = row
+                existing_week_dates.add(week_end_cell.value)
                 
                 # Only add non-duplicate rows to backfill list
                 if week_num_col_id and (week_num_cell is None or week_num_cell.value is None):
@@ -152,8 +153,6 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
                         'target_row_id': row.id,
                         'week_ending_date_str': week_end_cell.value
                     })
-            
-            existing_week_dates.add(week_end_cell.value)
     return snapshot_map, rows_to_backfill, existing_week_dates, duplicate_row_ids
 
 # --- LOGIC HANDLERS ---
