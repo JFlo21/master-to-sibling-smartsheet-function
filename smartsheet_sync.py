@@ -2,10 +2,12 @@
 
 import os
 import smartsheet
-from config import SHEET_CONFIG
+from config import SHEET_CONFIG, ENABLE_HISTORICAL_BACKFILL, HISTORICAL_BACKFILL_START
 from datetime import datetime, date, timedelta
 
-# --- HELPER FUNCTIONS ---
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
 
 def get_current_week_ending_date():
     today = date.today()
@@ -30,6 +32,51 @@ def resolve_column_id(column_ref, column_map):
         return column_map.get(column_ref)
     return None
 
+def normalize_tracking_id(tracking_value):
+    """
+    Normalizes tracking ID to ensure consistent string comparison.
+    Converts integers to strings for composite key matching.
+    """
+    if tracking_value is None:
+        return None
+    return str(tracking_value)
+
+def generate_composite_tracking_id(source_sheet_id, row_id):
+    """
+    Generates a composite tracking ID for multi-source scenarios.
+    Format: {source_sheet_id}_{row_id}
+    """
+    return f"{source_sheet_id}_{row_id}"
+
+def load_all_source_data(smart, source_sheets_config):
+    """
+    Loads data from all configured source sheets.
+    Returns a list of tuples: (source_sheet_object, source_config)
+    """
+    source_data = []
+    for source_config in source_sheets_config:
+        source_sheet_id = source_config['id']
+        try:
+            source_sheet = smart.Sheets.get_sheet(source_sheet_id)
+            print(f"  Loaded source sheet '{source_sheet.name}' (ID: {source_sheet_id}) with {len(source_sheet.rows)} rows")
+            source_data.append((source_sheet, source_config))
+        except Exception as e:
+            print(f"  ERROR: Could not load source sheet {source_sheet_id}: {e}")
+    return source_data
+
+def get_all_source_rows(source_data_list):
+    """
+    Collects all source rows from multiple source sheets with proper tracking IDs.
+    Returns a list of tuples: (source_row, composite_tracking_id, source_config)
+    """
+    all_rows = []
+    for source_sheet, source_config in source_data_list:
+        source_sheet_id = source_config['id']
+        for row in source_sheet.rows:
+            composite_id = generate_composite_tracking_id(source_sheet_id, row.id)
+            all_rows.append((row, composite_id, source_config))
+    return all_rows
+
 def get_target_row_map_for_update(smart, sheet, tracking_column_id):
     target_map = {}
     for row in sheet.rows:
@@ -42,11 +89,13 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
     """
     Scans a snapshot sheet to gather metadata.
     Returns:
-    1. A map of (source_id, date) -> target_row_object for update/enrichment checks.
+    1. A map of (normalized_source_id, date) -> target_row_object for update/enrichment checks.
     2. A list of rows that need their week number backfilled.
+    3. A set of unique week ending dates already present in the sheet.
     """
     snapshot_map = {}
     rows_to_backfill = []
+    existing_week_dates = set()
     
     # We need all columns to check for blank cells, so we fetch the full sheet data here.
     for row in smart.Sheets.get_sheet(sheet.id, include=['data']).rows:
@@ -55,19 +104,31 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
         week_num_cell = row.get_column(week_num_col_id) if week_num_col_id else None
 
         if tracking_cell and tracking_cell.value and week_end_cell and week_end_cell.value:
-            composite_key = (tracking_cell.value, week_end_cell.value)
+            # Normalize tracking ID to string for consistent comparison
+            normalized_tracking_id = normalize_tracking_id(tracking_cell.value)
+            composite_key = (normalized_tracking_id, week_end_cell.value)
             snapshot_map[composite_key] = row # Store the full row object
+            existing_week_dates.add(week_end_cell.value)
 
             if week_num_col_id and (week_num_cell is None or week_num_cell.value is None):
                 rows_to_backfill.append({
                     'target_row_id': row.id,
                     'week_ending_date_str': week_end_cell.value
                 })
-    return snapshot_map, rows_to_backfill
+    return snapshot_map, rows_to_backfill, existing_week_dates
 
 # --- LOGIC HANDLERS ---
 
-def handle_snapshot_sync(smart, source_sheet, target_config):
+def handle_snapshot_sync(smart, source_data_list, target_config):
+    """
+    Handles snapshot synchronization for a target sheet.
+    Supports multiple source sheets and historical backfill.
+    
+    Args:
+        smart: Smartsheet client
+        source_data_list: List of tuples (source_sheet, source_config)
+        target_config: Target sheet configuration
+    """
     target_sheet_id = target_config['id']
     target_sheet = smart.Sheets.get_sheet(target_sheet_id)
     target_col_map = get_column_map_by_name(target_sheet)
@@ -83,7 +144,9 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
         return
 
     # --- METADATA GATHERING ---
-    target_snapshot_map, rows_needing_backfill = get_snapshot_metadata(smart, target_sheet, tracking_col_id, week_end_col_id, week_num_col_id)
+    target_snapshot_map, rows_needing_backfill, existing_week_dates = get_snapshot_metadata(
+        smart, target_sheet, tracking_col_id, week_end_col_id, week_num_col_id
+    )
     
     # --- BACKFILL LOGIC ---
     if rows_needing_backfill:
@@ -131,12 +194,75 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
     current_week_num = calculate_week_number(current_wed)
     current_wed_str = current_wed.strftime('%Y-%m-%d')
 
+    # Get all source rows with composite tracking IDs
+    all_source_rows = get_all_source_rows(source_data_list)
+    total_source_rows = len(all_source_rows)
+    print(f"Total source rows across all source sheets: {total_source_rows}")
+
     # Check if this target has a sync start date filter
     sync_start_date_str = target_config.get('sync_start_date')
     sync_end_date_str = target_config.get('sync_end_date')
     weeks_to_process = [current_wed]  # Always process current week
     
-    if sync_start_date_str:
+    # Determine the earliest start date for historical backfill
+    if ENABLE_HISTORICAL_BACKFILL and sync_start_date_str:
+        backfill_start = datetime.strptime(HISTORICAL_BACKFILL_START, '%Y-%m-%d').date()
+        sync_start_date = datetime.strptime(sync_start_date_str, '%Y-%m-%d').date()
+        
+        # Use the later of the two dates (backfill start or sync start)
+        effective_start_date = max(backfill_start, sync_start_date)
+        
+        if current_wed < effective_start_date:
+            print(f"Current week ending date ({current_wed_str}) is before effective start date ({effective_start_date}). Skipping sync for this target.")
+            return
+        
+        if sync_end_date_str:
+            sync_end_date = datetime.strptime(sync_end_date_str, '%Y-%m-%d').date()
+            if current_wed > sync_end_date:
+                print(f"Current week ending date ({current_wed_str}) is after sync end date ({sync_end_date_str}). Skipping sync for this target.")
+                return
+            print(f"Date filter active: Syncing data from {effective_start_date} to {sync_end_date_str}. Current week ending: {current_wed_str}")
+        else:
+            sync_end_date = None
+            print(f"Date filter active: Only syncing data from {effective_start_date} onwards. Current week ending: {current_wed_str}")
+        
+        # Generate all missing weeks from effective start date to current week
+        # Find the first Sunday on or after the effective start date
+        first_sunday = effective_start_date
+        days_until_sunday = (6 - first_sunday.weekday() + 7) % 7
+        if days_until_sunday > 0:
+            first_sunday = first_sunday + timedelta(days=days_until_sunday)
+        
+        # Generate all Sundays (week ending dates) from first_sunday to current_wed
+        missing_weeks = []
+        week_date = first_sunday
+        
+        # Pre-compute tracking IDs for performance
+        all_tracking_ids = set(normalize_tracking_id(composite_id) for _, composite_id, _ in all_source_rows)
+
+        while week_date < current_wed and (sync_end_date is None or week_date <= sync_end_date):
+            week_date_str = week_date.strftime('%Y-%m-%d')
+            
+            # Count how many rows exist for this week using set intersection
+            week_snapshot_keys = set(tracking_id for (tracking_id, week) in target_snapshot_map.keys() if week == week_date_str)
+            existing_count = len(week_snapshot_keys)
+            
+            # Check if this week has incomplete snapshot
+            if existing_count < total_source_rows:
+                print(f"  Week {week_date_str}: {existing_count}/{total_source_rows} rows exist - marking for backfill")
+                missing_weeks.append(week_date)
+            else:
+                print(f"  Week {week_date_str}: Complete ({existing_count}/{total_source_rows} rows)")
+            
+            week_date += timedelta(days=7)
+        
+        if missing_weeks:
+            print(f"\nFound {len(missing_weeks)} weeks with incomplete snapshots to backfill")
+            weeks_to_process = missing_weeks + [current_wed]
+        else:
+            print("\nNo missing weeks found - all historical data is complete")
+    elif sync_start_date_str:
+        # No historical backfill, just respect sync dates
         sync_start_date = datetime.strptime(sync_start_date_str, '%Y-%m-%d').date()
         if current_wed < sync_start_date:
             print(f"Current week ending date ({current_wed_str}) is before sync start date ({sync_start_date_str}). Skipping sync for this target.")
@@ -147,48 +273,8 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
             if current_wed > sync_end_date:
                 print(f"Current week ending date ({current_wed_str}) is after sync end date ({sync_end_date_str}). Skipping sync for this target.")
                 return
-            print(f"Date filter active: Syncing data from {sync_start_date_str} to {sync_end_date_str}. Current week ending: {current_wed_str}")
-        else:
-            print(f"Date filter active: Only syncing data from {sync_start_date_str} onwards. Current week ending: {current_wed_str}")
-        
-        # Generate all missing weeks from sync start date to current week
-        # Find the first Sunday on or after the sync start date
-        first_sunday = sync_start_date
-        days_until_sunday = (6 - first_sunday.weekday() + 7) % 7
-        if days_until_sunday > 0:
-            first_sunday = first_sunday + timedelta(days=days_until_sunday)
-        
-        # Generate all Sundays (week ending dates) from first_sunday to current_wed
-        missing_weeks = []
-        week_date = first_sunday
-        # If there's an end date, limit generation up to that end date (inclusive for processing logic)
-        if sync_end_date_str:
-            sync_end_date = datetime.strptime(sync_end_date_str, '%Y-%m-%d').date()
-        else:
-            sync_end_date = None
 
-        while week_date < current_wed and (sync_end_date is None or week_date <= sync_end_date):
-            week_date_str = week_date.strftime('%Y-%m-%d')
-            # Check if this week already has snapshots for all source rows
-            has_complete_snapshot = True
-            for source_row in source_sheet.rows:
-                composite_key = (source_row.id, week_date_str)
-                if composite_key not in target_snapshot_map:
-                    has_complete_snapshot = False
-                    break
-            
-            if not has_complete_snapshot:
-                missing_weeks.append(week_date)
-            
-            week_date += timedelta(days=7)
-        
-        if missing_weeks:
-            print(f"Found {len(missing_weeks)} missing weeks to backfill: {[w.strftime('%Y-%m-%d') for w in missing_weeks]}")
-            weeks_to_process = missing_weeks + [current_wed]
-        else:
-            print("No missing weeks found - all historical data is present")
-
-    print(f"Processing {len(weeks_to_process)} week(s): {[w.strftime('%Y-%m-%d') for w in weeks_to_process]}")
+    print(f"\nProcessing {len(weeks_to_process)} week(s): {[w.strftime('%Y-%m-%d') for w in weeks_to_process]}")
     print(f"Found {len(target_snapshot_map)} existing snapshot entries in target.")
 
     all_rows_to_add = []
@@ -203,8 +289,9 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
         rows_to_add = []
         rows_to_update = []
 
-        for source_row in source_sheet.rows:
-            composite_key = (source_row.id, week_ending_str)
+        for source_row, composite_tracking_id, source_config in all_source_rows:
+            normalized_tracking_id = normalize_tracking_id(composite_tracking_id)
+            composite_key = (normalized_tracking_id, week_ending_str)
             
             if composite_key in target_snapshot_map:
                 # --- UPDATE LOGIC (only for current week) ---
@@ -213,45 +300,58 @@ def handle_snapshot_sync(smart, source_sheet, target_config):
                     update_row = smartsheet.models.Row({'id': target_row.id, 'cells': []})
                     needs_update = False
                     
-                    for source_col_id, target_col_ref in target_config['column_id_mapping'].items():
-                        target_col_id = resolve_column_id(target_col_ref, target_col_map)
-                        if target_col_id is None:
-                            print(f"    ! Skipping mapping for target column ref '{target_col_ref}' (not found)")
-                            continue
-                        source_cell = source_row.get_column(source_col_id)
-                        target_cell = target_row.get_column(target_col_id)
+                    # Get the work request column from source
+                    source_work_request_col_id = source_config['work_request_column_id']
+                    
+                    # Get target work request column
+                    target_work_request_col = target_config.get('target_work_request_column')
+                    if target_work_request_col is None:
+                        # Fall back to first mapping in column_id_mapping
+                        for src_col, tgt_col in target_config['column_id_mapping'].items():
+                            target_work_request_col = resolve_column_id(tgt_col, target_col_map)
+                            break
+                    
+                    if target_work_request_col:
+                        source_cell = source_row.get_column(source_work_request_col_id)
+                        target_cell = target_row.get_column(target_work_request_col)
                         
                         source_value = source_cell.value if source_cell else None
                         target_value = target_cell.value if target_cell else None
 
                         if source_value != target_value:
-                            # Ensure we always have a valid value (convert None to empty string)
                             update_value = source_value if source_value is not None else ""
-                            print(f"  - Updating snapshot for source row {source_row.id}. Value for target column {target_col_id} changed from '{target_value}' to '{source_value}'.")
+                            print(f"  - Updating snapshot for tracking ID {composite_tracking_id}. Value changed from '{target_value}' to '{source_value}'.")
                             needs_update = True
-                            update_row.cells.append(smartsheet.models.Cell({'column_id': target_col_id, 'value': update_value}))
+                            update_row.cells.append(smartsheet.models.Cell({'column_id': target_work_request_col, 'value': update_value}))
                     
                     if needs_update:
                         rows_to_update.append(update_row)
                 # Historical weeks already exist, skip them
             else:
                 # --- ADD LOGIC (for all missing weeks) ---
-                print(f"  - Preparing new snapshot for source row ID: {source_row.id}")
+                print(f"  - Preparing new snapshot for tracking ID: {composite_tracking_id}")
                 new_row = smartsheet.models.Row({'to_bottom': True, 'cells': []})
                 
-                for source_col_id, target_col_ref in target_config['column_id_mapping'].items():
-                    target_col_id = resolve_column_id(target_col_ref, target_col_map)
-                    if target_col_id is None:
-                        print(f"    ! Skipping mapping for target column ref '{target_col_ref}' (not found)")
-                        continue
-                    source_cell = source_row.get_column(source_col_id)
-                    source_value = source_cell.value if source_cell else None
+                # Get the work request column from source
+                source_work_request_col_id = source_config['work_request_column_id']
+                source_cell = source_row.get_column(source_work_request_col_id)
+                source_value = source_cell.value if source_cell else None
+                
+                # Get target work request column
+                target_work_request_col = target_config.get('target_work_request_column')
+                if target_work_request_col is None:
+                    # Fall back to first mapping in column_id_mapping
+                    for src_col, tgt_col in target_config['column_id_mapping'].items():
+                        target_work_request_col = resolve_column_id(tgt_col, target_col_map)
+                        break
+                
+                if target_work_request_col:
                     # Ensure we always have a valid value (convert None to empty string)
                     if source_value is None:
                         source_value = ""
-                    new_row.cells.append(smartsheet.models.Cell({'column_id': target_col_id, 'value': source_value}))
+                    new_row.cells.append(smartsheet.models.Cell({'column_id': target_work_request_col, 'value': source_value}))
                 
-                new_row.cells.append(smartsheet.models.Cell({'column_id': tracking_col_id, 'value': source_row.id}))
+                new_row.cells.append(smartsheet.models.Cell({'column_id': tracking_col_id, 'value': composite_tracking_id}))
                 new_row.cells.append(smartsheet.models.Cell({'column_id': week_end_col_id, 'value': week_ending_str}))
                 
                 if week_num_col_id:
@@ -339,31 +439,68 @@ def handle_update_sync(smart, source_sheet, target_config):
 # --- MAIN DISPATCHER ---
 
 def main_process(smart, config):
-    source_sheet_id = config['source_sheet_id']
     print("--- Starting Sync Process ---")
     
-    try:
-        source_sheet = smart.Sheets.get_sheet(source_sheet_id)
-        print(f"Successfully loaded source sheet: '{source_sheet.name}' with {len(source_sheet.rows)} rows.")
-    except Exception as e:
-        print(f"FATAL ERROR: Could not load source sheet. Halting. Error: {e}")
+    # Check if we have multi-source configuration
+    source_sheets_config = config.get('source_sheets')
+    legacy_source_sheet_id = config.get('source_sheet_id')
+    
+    # Load source data
+    source_data_list = []
+    if source_sheets_config:
+        print(f"Loading {len(source_sheets_config)} source sheets...")
+        source_data_list = load_all_source_data(smart, source_sheets_config)
+        if not source_data_list:
+            print("FATAL ERROR: Could not load any source sheets. Halting.")
+            return
+    elif legacy_source_sheet_id:
+        # Legacy single source mode for update targets
+        try:
+            source_sheet = smart.Sheets.get_sheet(legacy_source_sheet_id)
+            print(f"Successfully loaded legacy source sheet: '{source_sheet.name}' with {len(source_sheet.rows)} rows.")
+            # Create a dummy config for legacy mode
+            # Note: work_request_column_id is None because update mode uses column_id_mapping
+            # from the target config rather than source config work_request_column_id
+            legacy_config = {
+                'id': legacy_source_sheet_id,
+                'description': 'Legacy Source Sheet',
+                'work_request_column_id': None  # Only used in snapshot mode with multi-source
+            }
+            source_data_list = [(source_sheet, legacy_config)]
+        except Exception as e:
+            print(f"FATAL ERROR: Could not load source sheet. Halting. Error: {e}")
+            return
+    else:
+        print("FATAL ERROR: No source sheet configuration found. Halting.")
         return
 
     for target_config in config['targets']:
         sync_mode = target_config.get('sync_mode', 'update')
-        print(f"\nProcessing target: '{target_config['description']}' (ID: {target_config['id']}) with '{sync_mode}' mode.")
+        print(f"\n{'='*80}")
+        print(f"Processing target: '{target_config['description']}' (ID: {target_config['id']})")
+        print(f"Sync mode: '{sync_mode}'")
+        print(f"{'='*80}")
         
         try:
             if sync_mode == 'snapshot':
-                handle_snapshot_sync(smart, source_sheet, target_config)
+                handle_snapshot_sync(smart, source_data_list, target_config)
             elif sync_mode == 'update':
-                handle_update_sync(smart, source_sheet, target_config)
+                # Update mode still uses single source (first source or legacy)
+                source_sheet = source_data_list[0][0] if source_data_list else None
+                if source_sheet:
+                    handle_update_sync(smart, source_sheet, target_config)
+                else:
+                    print(f"WARNING: No source sheet available for update mode. Skipping target.")
             else:
                 print(f"WARNING: Unknown sync_mode '{sync_mode}'. Skipping target.")
         except Exception as e:
             print(f"ERROR processing target {target_config['id']}. Error: {e}")
+            import traceback
+            traceback.print_exc()
 
-    print("\n--- Sync Process Complete ---")
+    print("\n" + "="*80)
+    print("--- Sync Process Complete ---")
+    print("="*80)
 
 if __name__ == '__main__':
     access_token = os.getenv('SMARTSHEET_ACCESS_TOKEN')
