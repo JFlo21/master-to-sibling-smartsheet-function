@@ -85,6 +85,34 @@ def get_target_row_map_for_update(smart, sheet, tracking_column_id):
             target_map[tracking_cell.value] = row
     return target_map
 
+def delete_duplicate_rows(smart, sheet_id, duplicate_row_ids):
+    """
+    Deletes duplicate rows from a sheet in batches.
+    Smartsheet API allows deleting multiple rows in a single call.
+    
+    Args:
+        smart: Smartsheet client
+        sheet_id: Target sheet ID
+        duplicate_row_ids: List of row IDs to delete
+    """
+    if not duplicate_row_ids:
+        return
+    
+    print(f"Deleting {len(duplicate_row_ids)} duplicate rows...")
+    
+    # Process in batches of 100 to avoid API limits
+    batch_size = 100
+    total_batches = (len(duplicate_row_ids) + batch_size - 1) // batch_size
+    
+    for i in range(0, len(duplicate_row_ids), batch_size):
+        batch = duplicate_row_ids[i:i + batch_size]
+        batch_num = (i // batch_size) + 1
+        print(f"  Deleting batch {batch_num}/{total_batches} ({len(batch)} rows)...")
+        smart.Sheets.delete_rows(sheet_id, batch)
+        print(f"  Batch {batch_num} deleted successfully.")
+    
+    print(f"Successfully deleted all {len(duplicate_row_ids)} duplicate rows.")
+
 def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_num_col_id):
     """
     Scans a snapshot sheet to gather metadata.
@@ -92,10 +120,12 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
     1. A map of (normalized_source_id, date) -> target_row_object for update/enrichment checks.
     2. A list of rows that need their week number backfilled.
     3. A set of unique week ending dates already present in the sheet.
+    4. A list of duplicate row IDs to delete.
     """
     snapshot_map = {}
     rows_to_backfill = []
     existing_week_dates = set()
+    duplicate_row_ids = []
     
     # We need all columns to check for blank cells, so we fetch the full sheet data here.
     for row in smart.Sheets.get_sheet(sheet.id, include=['data']).rows:
@@ -107,15 +137,23 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
             # Normalize tracking ID to string for consistent comparison
             normalized_tracking_id = normalize_tracking_id(tracking_cell.value)
             composite_key = (normalized_tracking_id, week_end_cell.value)
-            snapshot_map[composite_key] = row # Store the full row object
-            existing_week_dates.add(week_end_cell.value)
-
-            if week_num_col_id and (week_num_cell is None or week_num_cell.value is None):
-                rows_to_backfill.append({
-                    'target_row_id': row.id,
-                    'week_ending_date_str': week_end_cell.value
-                })
-    return snapshot_map, rows_to_backfill, existing_week_dates
+            
+            # Check if this composite key already exists (duplicate detection)
+            if composite_key in snapshot_map:
+                # This is a duplicate - mark for deletion
+                duplicate_row_ids.append(row.id)
+            else:
+                # First occurrence - keep this row
+                snapshot_map[composite_key] = row
+                existing_week_dates.add(week_end_cell.value)
+                
+                # Only add non-duplicate rows to backfill list
+                if week_num_col_id and (week_num_cell is None or week_num_cell.value is None):
+                    rows_to_backfill.append({
+                        'target_row_id': row.id,
+                        'week_ending_date_str': week_end_cell.value
+                    })
+    return snapshot_map, rows_to_backfill, existing_week_dates, duplicate_row_ids
 
 # --- LOGIC HANDLERS ---
 
@@ -144,9 +182,15 @@ def handle_snapshot_sync(smart, source_data_list, target_config):
         return
 
     # --- METADATA GATHERING ---
-    target_snapshot_map, rows_needing_backfill, existing_week_dates = get_snapshot_metadata(
+    target_snapshot_map, rows_needing_backfill, existing_week_dates, duplicate_row_ids = get_snapshot_metadata(
         smart, target_sheet, tracking_col_id, week_end_col_id, week_num_col_id
     )
+    
+    # --- DUPLICATE CLEANUP ---
+    if duplicate_row_ids:
+        print(f"\nFound {len(duplicate_row_ids)} duplicate rows in target sheet.")
+        delete_duplicate_rows(smart, target_sheet_id, duplicate_row_ids)
+        print("Duplicate cleanup complete.\n")
     
     # --- BACKFILL LOGIC ---
     if rows_needing_backfill:
