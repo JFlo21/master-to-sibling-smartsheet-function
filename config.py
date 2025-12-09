@@ -140,14 +140,14 @@ SHEET_CONFIG = {
                 'week_number': 8957950735110020,       # Target "Week Number" column
             },
             # DATE FILTER: Independent start date - no end date
-            # This sheet processes all data from 09/07/2025 onwards indefinitely
-            'sync_start_date': '2025-09-07',
+            # This sheet processes all data from 06/29/2025 onwards indefinitely
+            'sync_start_date': '2025-06-29',
             'target_work_request_column': 6811704037691268,  # Explicit target column ID
         },
         # TERTIARY TARGET SHEET
         {
             'id': 6620020097372036,
-            'description': 'Tertiary Target Sheet (Weekly Snapshot) — Active 2025-10-05+',
+            'description': 'Tertiary Target Sheet (Weekly Snapshot) — Active 2025-06-29+',
             'sync_mode': 'snapshot',
             'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
@@ -161,13 +161,13 @@ SHEET_CONFIG = {
                 'week_number': 'Week Number',
             },
             # DATE FILTER: Independent start date - no end date
-            # This sheet processes all data from 10/05/2025 onwards indefinitely
-            'sync_start_date': '2025-10-05'
+            # This sheet processes all data from 06/29/2025 onwards indefinitely
+            'sync_start_date': '2025-06-29'
         },
         # QUATERNARY TARGET SHEET
         {
             'id': 5477191610486660,
-            'description': 'Quaternary Target Sheet (Weekly Snapshot) — Active 2025-10-19+',
+            'description': 'Quaternary Target Sheet (Weekly Snapshot) — Active 2025-06-29+',
             'sync_mode': 'snapshot',
             'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
@@ -181,13 +181,13 @@ SHEET_CONFIG = {
                 'week_number': 'Week Number',
             },
             # DATE FILTER: Independent start date - no end date
-            # This sheet processes all data from 10/19/2025 onwards indefinitely
-            'sync_start_date': '2025-10-19'
+            # This sheet processes all data from 06/29/2025 onwards indefinitely
+            'sync_start_date': '2025-06-29'
         },
         # QUINARY TARGET SHEET
         {
             'id': 8891640346267524,
-            'description': 'Quinary Target Sheet (Weekly Snapshot) — Active 2025-10-31+',
+            'description': 'Quinary Target Sheet (Weekly Snapshot) — Active 2025-06-29+',
             'sync_mode': 'snapshot',
             'tracking_column_name': 'Source_Row_ID',
             'column_id_mapping': {
@@ -202,9 +202,9 @@ SHEET_CONFIG = {
                 'week_number': 'Week Number',             # ISO 8601 week number
             },
             # DATE FILTER: Independent start date - no end date
-            # This sheet processes all data from 10/31/2025 onwards indefinitely
+            # This sheet processes all data from 06/29/2025 onwards indefinitely
             # Runs concurrently with other snapshot sheets based on date filtering
-            'sync_start_date': '2025-10-31'
+            'sync_start_date': '2025-06-29'
         },
     ]
 }
