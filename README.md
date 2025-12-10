@@ -144,10 +144,12 @@ For large datasets:
 
 ### Target Sheet Order (Snapshot Mode)
 
+All snapshot target sheets now process data from **2025-06-29** onwards:
+
 1. **Primary**: 2198406433820548 (Start: 2025-06-29)
-2. **Secondary**: 2894503242321796 (Start: 2025-09-07)
-3. **Tertiary**: 6620020097372036 (Start: 2025-10-05)
-4. **Quaternary**: 5477191610486660 (Start: 2025-10-19)
-5. **Quinary**: 8891640346267524 (Start: 2025-10-31)
+2. **Secondary**: 2894503242321796 (Start: 2025-06-29)
+3. **Tertiary**: 6620020097372036 (Start: 2025-06-29)
+4. **Quaternary**: 5477191610486660 (Start: 2025-06-29)
+5. **Quinary**: 8891640346267524 (Start: 2025-06-29)
 
 Each sheet processes data from its start date onwards indefinitely.
