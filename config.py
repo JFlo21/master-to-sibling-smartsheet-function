@@ -206,5 +206,27 @@ SHEET_CONFIG = {
             # Runs concurrently with other snapshot sheets based on date filtering
             'sync_start_date': '2025-06-29'
         },
+        # SENARY TARGET SHEET
+        {
+            'id': 5621034108538756,
+            'description': 'Senary Target Sheet (Weekly Snapshot) — Active 2025-06-29+',
+            'sync_mode': 'snapshot',
+            'tracking_column_name': 'Source_Row_ID',
+            'column_id_mapping': {
+                # Map source "Work Request #" to target "Work Request #"
+                # Using column name for runtime resolution (recommended pattern)
+                6922793410842500: 'Work Request #',
+            },
+            # Columns populated by script-generated calculated values (resolved by name)
+            # These values are computed during sync execution based on temporal logic
+            'generated_columns': {
+                'week_ending_date': 'Week Ending Date',  # ISO week ending date calculation
+                'week_number': 'Week Number',             # ISO 8601 week number
+            },
+            # DATE FILTER: Independent start date - no end date
+            # This sheet processes all data from 06/29/2025 onwards indefinitely
+            # Runs concurrently with other snapshot sheets based on date filtering
+            'sync_start_date': '2025-06-29'
+        },
     ]
 }
