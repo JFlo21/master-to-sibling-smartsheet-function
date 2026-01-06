@@ -192,7 +192,7 @@ def delete_duplicate_rows(smart, sheet_id, duplicate_row_ids):
     else:
         print(f"Successfully deleted all {deleted_count} duplicate rows.")
 
-def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_num_col_id):
+def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_num_col_id, work_request_col_id=None):
     """
     Scans a snapshot sheet to gather metadata.
     Returns:
@@ -200,9 +200,11 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
     2. A list of rows that need their week number backfilled.
     3. A set of unique week ending dates already present in the sheet.
     4. A list of duplicate row IDs to delete.
+    5. A map of (work_request_value, week_ending_date) -> target_row for cross-source deduplication.
     
-    Also detects and marks for deletion old-format tracking IDs that have corresponding
-    new composite tracking IDs (e.g., '1952874516057988' when '3733355007790980_1952874516057988' exists).
+    Also detects and marks for deletion:
+    - Old-format tracking IDs that have corresponding new composite tracking IDs
+    - Cross-source duplicates where the same Work Request # exists for the same week from different sources
     """
     snapshot_map = {}
     rows_to_backfill = []
@@ -214,51 +216,71 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
     # Track new composite entries for second pass matching
     new_composite_entries = []
     
+    # Cross-source deduplication: track (work_request_value, week_ending_date) -> first row seen
+    work_request_week_map = {}
+    
     # We need all columns to check for blank cells, so we fetch the full sheet data here.
     for row in smart.Sheets.get_sheet(sheet.id, include=['data']).rows:
         tracking_cell = row.get_column(tracking_col_id)
         week_end_cell = row.get_column(week_end_col_id)
         week_num_cell = row.get_column(week_num_col_id) if week_num_col_id else None
+        work_request_cell = row.get_column(work_request_col_id) if work_request_col_id else None
 
         if tracking_cell and tracking_cell.value and week_end_cell and week_end_cell.value:
             # Normalize tracking ID to string for consistent comparison
             normalized_tracking_id = normalize_tracking_id(tracking_cell.value)
             composite_key = (normalized_tracking_id, week_end_cell.value)
             
-            # Check if this composite key already exists (duplicate detection)
+            # Check if this composite key already exists (duplicate detection by tracking ID)
             if composite_key in snapshot_map:
                 # This is a duplicate - mark for deletion
                 duplicate_row_ids_set.add(row.id)
-            else:
-                # First occurrence - keep this row
-                snapshot_map[composite_key] = row
-                existing_week_dates.add(week_end_cell.value)
+                continue
+            
+            # Cross-source duplicate detection: check if same Work Request # exists for same week
+            if work_request_col_id and work_request_cell and work_request_cell.value:
+                work_request_value = str(work_request_cell.value).strip()
+                work_request_key = (work_request_value, week_end_cell.value)
                 
-                # Track old-format entries for potential cleanup
-                if is_old_format_tracking_id(normalized_tracking_id):
-                    # Old format: tracking_id is just the row_id
-                    old_format_key = (normalized_tracking_id, week_end_cell.value)
-                    old_format_entries[old_format_key] = row.id
+                if work_request_key in work_request_week_map:
+                    # Same Work Request # already exists for this week from another source
+                    # Mark this row as duplicate (keep the first one seen)
+                    duplicate_row_ids_set.add(row.id)
+                    print(f"  Cross-source duplicate: Work Request '{work_request_value}' for week {week_end_cell.value} - marking row {row.id} for deletion")
+                    continue
                 else:
-                    # New composite format: track for second pass and check against existing old entries
-                    row_id_portion = extract_row_id_from_tracking_id(normalized_tracking_id)
-                    new_composite_entries.append((row_id_portion, week_end_cell.value))
-                    
-                    # Check if there's an old-format entry to clean up
-                    old_format_key = (row_id_portion, week_end_cell.value)
-                    if old_format_key in old_format_entries:
-                        # Found an old-format entry that matches this new composite entry
-                        old_row_id = old_format_entries[old_format_key]
-                        if old_row_id not in duplicate_row_ids_set:
-                            duplicate_row_ids_set.add(old_row_id)
-                            print(f"  Marking old-format tracking ID row for deletion: {old_row_id} (migrated to composite ID)")
+                    # First occurrence of this Work Request # for this week
+                    work_request_week_map[work_request_key] = row
+            
+            # First occurrence - keep this row
+            snapshot_map[composite_key] = row
+            existing_week_dates.add(week_end_cell.value)
+            
+            # Track old-format entries for potential cleanup
+            if is_old_format_tracking_id(normalized_tracking_id):
+                # Old format: tracking_id is just the row_id
+                old_format_key = (normalized_tracking_id, week_end_cell.value)
+                old_format_entries[old_format_key] = row.id
+            else:
+                # New composite format: track for second pass and check against existing old entries
+                row_id_portion = extract_row_id_from_tracking_id(normalized_tracking_id)
+                new_composite_entries.append((row_id_portion, week_end_cell.value))
                 
-                # Only add non-duplicate rows to backfill list
-                if week_num_col_id and (week_num_cell is None or week_num_cell.value is None):
-                    rows_to_backfill.append({
-                        'target_row_id': row.id,
-                        'week_ending_date_str': week_end_cell.value
-                    })
+                # Check if there's an old-format entry to clean up
+                old_format_key = (row_id_portion, week_end_cell.value)
+                if old_format_key in old_format_entries:
+                    # Found an old-format entry that matches this new composite entry
+                    old_row_id = old_format_entries[old_format_key]
+                    if old_row_id not in duplicate_row_ids_set:
+                        duplicate_row_ids_set.add(old_row_id)
+                        print(f"  Marking old-format tracking ID row for deletion: {old_row_id} (migrated to composite ID)")
+            
+            # Only add non-duplicate rows to backfill list
+            if week_num_col_id and (week_num_cell is None or week_num_cell.value is None):
+                rows_to_backfill.append({
+                    'target_row_id': row.id,
+                    'week_ending_date_str': week_end_cell.value
+                })
     
     # Second pass: Check for any new composite entries that match old-format entries in snapshot_map
     # This handles cases where the old entry was processed before the new entry in the loop
@@ -270,7 +292,7 @@ def get_snapshot_metadata(smart, sheet, tracking_col_id, week_end_col_id, week_n
                 duplicate_row_ids_set.add(old_row.id)
                 print(f"  Marking old-format tracking ID row for deletion: {old_row.id} (migrated to composite ID)")
     
-    return snapshot_map, rows_to_backfill, existing_week_dates, list(duplicate_row_ids_set)
+    return snapshot_map, rows_to_backfill, existing_week_dates, list(duplicate_row_ids_set), work_request_week_map
 
 # --- LOGIC HANDLERS ---
 
@@ -278,6 +300,7 @@ def handle_snapshot_sync(smart, source_data_list, target_config):
     """
     Handles snapshot synchronization for a target sheet.
     Supports multiple source sheets and historical backfill.
+    Includes cross-source deduplication based on Work Request # values.
     
     Args:
         smart: Smartsheet client
@@ -293,15 +316,25 @@ def handle_snapshot_sync(smart, source_data_list, target_config):
     generated_cols_config = target_config.get('generated_columns', {})
     week_end_col_id = resolve_column_id(generated_cols_config.get('week_ending_date'), target_col_map)
     week_num_col_id = resolve_column_id(generated_cols_config.get('week_number'), target_col_map)
+    
+    # Resolve Work Request column for cross-source deduplication
+    target_work_request_col = target_config.get('target_work_request_column')
+    if target_work_request_col is None:
+        # Fall back to first mapping in column_id_mapping
+        for src_col, tgt_col in target_config['column_id_mapping'].items():
+            target_work_request_col = resolve_column_id(tgt_col, target_col_map)
+            break
 
     if not week_end_col_id:
         print("WARNING: 'week_ending_date' not configured for this snapshot sheet. Halting snapshot logic.")
         return
 
-    # --- METADATA GATHERING ---
-    target_snapshot_map, rows_needing_backfill, existing_week_dates, duplicate_row_ids = get_snapshot_metadata(
-        smart, target_sheet, tracking_col_id, week_end_col_id, week_num_col_id
+    # --- METADATA GATHERING (with cross-source deduplication) ---
+    target_snapshot_map, rows_needing_backfill, existing_week_dates, duplicate_row_ids, work_request_week_map = get_snapshot_metadata(
+        smart, target_sheet, tracking_col_id, week_end_col_id, week_num_col_id, target_work_request_col
     )
+    
+    print(f"Found {len(work_request_week_map)} unique (Work Request #, Week) combinations in target sheet.")
     
     # --- DUPLICATE CLEANUP ---
     if duplicate_row_ids:
@@ -454,6 +487,15 @@ def handle_snapshot_sync(smart, source_data_list, target_config):
             normalized_tracking_id = normalize_tracking_id(composite_tracking_id)
             composite_key = (normalized_tracking_id, week_ending_str)
             
+            # Get the work request value for cross-source deduplication
+            source_work_request_col_id = source_config['work_request_column_id']
+            source_cell = source_row.get_column(source_work_request_col_id)
+            source_value = source_cell.value if source_cell else None
+            source_value_str = str(source_value).strip() if source_value else ""
+            
+            # Create work request key for cross-source duplicate check
+            work_request_key = (source_value_str, week_ending_str) if source_value_str else None
+            
             if composite_key in target_snapshot_map:
                 # --- UPDATE LOGIC (only for current week) ---
                 if week_ending_date == current_wed:
@@ -461,56 +503,50 @@ def handle_snapshot_sync(smart, source_data_list, target_config):
                     update_row = smartsheet.models.Row({'id': target_row.id, 'cells': []})
                     needs_update = False
                     
-                    # Get the work request column from source
-                    source_work_request_col_id = source_config['work_request_column_id']
-                    
                     # Get target work request column
-                    target_work_request_col = target_config.get('target_work_request_column')
-                    if target_work_request_col is None:
+                    target_work_request_col_resolved = target_config.get('target_work_request_column')
+                    if target_work_request_col_resolved is None:
                         # Fall back to first mapping in column_id_mapping
                         for src_col, tgt_col in target_config['column_id_mapping'].items():
-                            target_work_request_col = resolve_column_id(tgt_col, target_col_map)
+                            target_work_request_col_resolved = resolve_column_id(tgt_col, target_col_map)
                             break
                     
-                    if target_work_request_col:
-                        source_cell = source_row.get_column(source_work_request_col_id)
-                        target_cell = target_row.get_column(target_work_request_col)
-                        
-                        source_value = source_cell.value if source_cell else None
+                    if target_work_request_col_resolved:
+                        target_cell = target_row.get_column(target_work_request_col_resolved)
                         target_value = target_cell.value if target_cell else None
 
                         if source_value != target_value:
                             update_value = source_value if source_value is not None else ""
                             print(f"  - Updating snapshot for tracking ID {composite_tracking_id}. Value changed from '{target_value}' to '{source_value}'.")
                             needs_update = True
-                            update_row.cells.append(smartsheet.models.Cell({'column_id': target_work_request_col, 'value': update_value}))
+                            update_row.cells.append(smartsheet.models.Cell({'column_id': target_work_request_col_resolved, 'value': update_value}))
                     
                     if needs_update:
                         rows_to_update.append(update_row)
                 # Historical weeks already exist, skip them
             else:
                 # --- ADD LOGIC (for all missing weeks) ---
+                
+                # Cross-source deduplication: skip if this Work Request # already exists for this week
+                if work_request_key and work_request_key in work_request_week_map:
+                    print(f"  - Skipping duplicate Work Request '{source_value_str}' for week {week_ending_str} (already exists from another source)")
+                    continue
+                
                 print(f"  - Preparing new snapshot for tracking ID: {composite_tracking_id}")
                 new_row = smartsheet.models.Row({'to_bottom': True, 'cells': []})
                 
-                # Get the work request column from source
-                source_work_request_col_id = source_config['work_request_column_id']
-                source_cell = source_row.get_column(source_work_request_col_id)
-                source_value = source_cell.value if source_cell else None
-                
                 # Get target work request column
-                target_work_request_col = target_config.get('target_work_request_column')
-                if target_work_request_col is None:
+                target_work_request_col_resolved = target_config.get('target_work_request_column')
+                if target_work_request_col_resolved is None:
                     # Fall back to first mapping in column_id_mapping
                     for src_col, tgt_col in target_config['column_id_mapping'].items():
-                        target_work_request_col = resolve_column_id(tgt_col, target_col_map)
+                        target_work_request_col_resolved = resolve_column_id(tgt_col, target_col_map)
                         break
                 
-                if target_work_request_col:
+                if target_work_request_col_resolved:
                     # Ensure we always have a valid value (convert None to empty string)
-                    if source_value is None:
-                        source_value = ""
-                    new_row.cells.append(smartsheet.models.Cell({'column_id': target_work_request_col, 'value': source_value}))
+                    cell_value = source_value if source_value is not None else ""
+                    new_row.cells.append(smartsheet.models.Cell({'column_id': target_work_request_col_resolved, 'value': cell_value}))
                 
                 new_row.cells.append(smartsheet.models.Cell({'column_id': tracking_col_id, 'value': composite_tracking_id}))
                 new_row.cells.append(smartsheet.models.Cell({'column_id': week_end_col_id, 'value': week_ending_str}))
@@ -519,6 +555,10 @@ def handle_snapshot_sync(smart, source_data_list, target_config):
                     new_row.cells.append(smartsheet.models.Cell({'column_id': week_num_col_id, 'value': week_num}))
                 
                 rows_to_add.append(new_row)
+                
+                # Track this work request so we don't add it again from another source in this run
+                if work_request_key:
+                    work_request_week_map[work_request_key] = True
 
         all_rows_to_add.extend(rows_to_add)
         all_rows_to_update.extend(rows_to_update)
